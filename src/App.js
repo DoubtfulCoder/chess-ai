@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { Chessboard } from 'react-chessboard';
 import { moveEval } from './PositionEval';
 
-console.log('Qd6', moveEval('Qd6', 'black'));
+// console.log('Qd6', moveEval('Qd6', 'black'));
 
 export const pieceValues = {
 	p: 1,
@@ -31,6 +31,7 @@ function allDefined(arr) {
 export default function App({ boardWidth }) {
 	const chessboardRef = useRef();
 	const [game, setGame] = useState(new Chess());
+    const [isFirstMove, setIsFirstMove] = useState(true);
 	const [arrows, setArrows] = useState([]);
 	const [boardOrientation, setBoardOrientation] = useState('white');
 	const [currentTimeout, setCurrentTimeout] = useState(undefined);
@@ -102,17 +103,53 @@ export default function App({ boardWidth }) {
 	}
 
 	function computerMove() {
+        if (isFirstMove) {
+            game.move('d5');
+            setIsFirstMove(false);
+            return;
+        }
 		const possibleMoves = game.moves();
+		const workers = [];
+		// Most moves evaluated on 3 threads with remainder on main thread
+		const workerChunk = Math.floor(possibleMoves.length / 3);
+		const mainThreadStart = workerChunk * 3;
+		let numWorkersDone = 0;
+
 		let bestEval = Number.NEGATIVE_INFINITY;
 		let bestMove;
 
+		for (let i = 0; i < 3; i++) {
+			workers[i] = new Worker(new URL('./worker.js', import.meta.url));
+			workers[i].postMessage({
+				depth: 4,
+				isMaximizingPlayer: true,
+				posMoves: possibleMoves.slice(i * workerChunk, (i + 1) * workerChunk),
+				gameFEN: game.fen(),
+			});
+			workers[i].onmessage = (msg) => {
+				numWorkersDone++;
+
+				const msgEval = msg.data[0];
+				const msgMove = msg.data[1];
+				if (msgEval > bestEval) {
+					bestEval = msgEval;
+					bestMove = msgMove;
+				}
+
+				if (numWorkersDone === 3) {
+					console.log('bestmove', bestEval, bestMove);
+					safeGameMutate((g) => g.move(bestMove));
+				}
+			};
+		}
+
+		// Finish last few moves on main thread
 		const startTime = performance.now();
-		for (let i = 0; i < possibleMoves.length; i++) {
+		for (let i = mainThreadStart; i < possibleMoves.length; i++) {
 			const posMove = possibleMoves[i];
 			game.move(posMove);
-			// console.log('posmove', posMove, moveEval(posMove));
 			const squareEval = moveEval(posMove);
-			const score = minimax(2, false, 'black', squareEval);
+			const score = minimax(3, false, 'black', squareEval);
 			game.undo();
 			if (score > bestEval) {
 				bestEval = score;
@@ -121,10 +158,27 @@ export default function App({ boardWidth }) {
 		}
 
 		const endTime = performance.now();
-		console.log(`Call to minmax took ${endTime - startTime} milliseconds`);
+		console.log(`MAIN THREAD: minmax took ${(endTime - startTime)/1000} seconds`);
 
-		console.log('bestMove', bestMove);
-		safeGameMutate((g) => g.move(bestMove));
+		// const startTime = performance.now();
+		// for (let i = 0; i < possibleMoves.length; i++) {
+		// 	const posMove = possibleMoves[i];
+		// 	game.move(posMove);
+		// 	// console.log('posmove', posMove, moveEval(posMove));
+		// 	const squareEval = moveEval(posMove);
+		// 	const score = minimax(2, false, 'black', squareEval);
+		// 	game.undo();
+		// 	if (score > bestEval) {
+		// 		bestEval = score;
+		// 		bestMove = posMove;
+		// 	}
+		// }
+
+		// const endTime = performance.now();
+		// console.log(`Call to minmax took ${(endTime - startTime)/1000} seconds`);
+
+		// console.log('bestMove', bestMove);
+		// safeGameMutate((g) => g.move(bestMove));
 
 		// Pick a random score from all best moves
 		// const maxScore = Math.max(...scores);
@@ -187,6 +241,7 @@ export default function App({ boardWidth }) {
 				}}
 				ref={chessboardRef}
 			/>
+            <p>History: {game.history().map(move => move + '\n')}</p>
 			<button
 				className="rc-button"
 				onClick={() => {

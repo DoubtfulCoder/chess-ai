@@ -64,8 +64,12 @@ function stripped_san(move) {
 
 // gets move in SAN (e.g. Nc4) and gets corresponding eval from bestSquares
 export function moveEval(move, color='black') {
-    // ignore promotion moves and castling
-    if (move.includes('=') || move.includes('O-O')) { return 0; }
+    // castling is +0.7
+    if (move.includes('O-O')) { return 0.7; }
+    // promotion is +9
+    if (move.includes('=')) { return 9; }
+    // discourage checks TODO : make this only for first 15 moves
+    if (move.includes('+')) { return -0.5; }
 
     move = stripped_san(move); // remove decorations like +!?# at end
 	// piece code is always first char for non-pawns

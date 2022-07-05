@@ -21,3 +21,7 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+src/App(2).js
+src/worker(2).js
+src/workerOLD.js
