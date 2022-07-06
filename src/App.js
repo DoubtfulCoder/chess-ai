@@ -1,12 +1,14 @@
 import { Chess } from 'chess.js';
 import { useRef, useState } from 'react';
 import { Chessboard } from 'react-chessboard';
-import { moveEval } from './PositionEval';
+import { moveEval, sortMoves } from './PositionEval';
 
 // console.log('Qd6', moveEval('Qd6', 'black'));
 console.log('Number of threads on your device: ', navigator.hardwareConcurrency);
 
-const numThreads = navigator.hardwareConcurrency;
+const NUM_THREADS = navigator.hardwareConcurrency;
+const QUEENS_RAID = 'rnb1k1nr/pppp1ppp/5q2/2b1p3/4P1Q1/2N5/PPPP1PPP/R1B1KBNR w KQkq - 4 4';
+const TRICKY_POSITION = 'r3k2r/p1ppqpb1/bn2pnp1/3PN3/4P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1';
 
 export const pieceValues = {
 	p: 1,
@@ -38,11 +40,17 @@ export function isQuietMove(move) {
 
 export default function App({ boardWidth }) {
 	const chessboardRef = useRef();
-	const [game, setGame] = useState(new Chess());
+	const [game, setGame] = useState(new Chess(TRICKY_POSITION));
     const [isFirstMove, setIsFirstMove] = useState(true);
 	const [arrows, setArrows] = useState([]);
 	const [boardOrientation, setBoardOrientation] = useState('white');
 	const [currentTimeout, setCurrentTimeout] = useState(undefined);
+
+
+	// console.log(game.get('a3'));
+	let nodes = 0;
+	let sortingTime = 0;
+	let quiescenceTime = 0;
 
 	function safeGameMutate(modify) {
 		setGame((g) => {
@@ -56,21 +64,33 @@ export default function App({ boardWidth }) {
 		depth, isMaximizingPlayer, playerColor, moveEval, mostRecentMove,
 		alpha = Number.NEGATIVE_INFINITY, beta = Number.POSITIVE_INFINITY
 	) {
+		nodes++;
 		// Base case: evaluate board
 		if (depth === 0) {
             // check for quiet moves (non-captures)
             if (isQuietMove(mostRecentMove)) {
 			    return positionEval(playerColor) + moveEval;
             } else {
-                return quiescenceSearch(
+				const startTime = performance.now();
+                const quiescence = quiescenceSearch(
                     2, isMaximizingPlayer, playerColor, moveEval, mostRecentMove,
                     alpha, beta
                 );
+				const endTime = performance.now();
+				quiescenceTime += endTime - startTime;
+				return quiescence;
             }
 		}
 
 		// Recursive case: search possible moves
-		const possibleMoves = game.moves();
+		let possibleMoves = game.moves();
+		// Sort moves to put captures first
+		// console.log('presort', possibleMoves);
+		// const startTime = performance.now();
+		possibleMoves = sortMoves(game, possibleMoves);
+		// const endTime = performance.now();
+		// sortingTime += (endTime - startTime);
+		// console.log('postsort', possibleMoves);
         let bestMoveValue = isMaximizingPlayer
 					? Number.NEGATIVE_INFINITY
 					: Number.POSITIVE_INFINITY;
@@ -78,6 +98,10 @@ export default function App({ boardWidth }) {
 		// Search through all possible moves
 		for (let i = 0; i < possibleMoves.length; i++) {
 			const move = possibleMoves[i];
+			// if (!isQuietMove(move)) {
+				// console.log(move, 'NOT QUIET. CAPTURE EVAL: ', getCaptureValue(game, move));
+				// console.log(game.ascii());
+			// }
 			// Make the move, but undo before exiting loop
 			game.move(move);
 			// Recursively get the value from this move
@@ -112,7 +136,19 @@ export default function App({ boardWidth }) {
 		depth, isMaximizingPlayer, playerColor, moveEval, mostRecentMove,
 		alpha = Number.NEGATIVE_INFINITY, beta = Number.POSITIVE_INFINITY
 	) {
-        console.log('Quiescence search', mostRecentMove);
+		nodes++;
+
+		// evaluate position
+		const evaluation = positionEval(playerColor) + moveEval;
+		
+		// fail-hard beta cutoff
+		if (evaluation >= beta)
+		{
+			// node (move) fails high
+			return beta;
+		}
+
+        // console.log('Quiescence search', mostRecentMove);
 		// Base case: evaluate board
 		if (isQuietMove(mostRecentMove) || depth === 0) {
             // console.log('Quiescence search', mostRecentMove);
@@ -120,7 +156,13 @@ export default function App({ boardWidth }) {
 		}
 
 		// Recursive case: search possible moves
-		const possibleMoves = game.moves();
+		let possibleMoves = game.moves();
+		// console.log('presort', possibleMoves);
+		// const startTime = performance.now();
+		possibleMoves = sortMoves(game, possibleMoves);
+		// const endTime = performance.now();
+		// sortingTime += endTime - startTime;
+		// console.log('postsort', possibleMoves);
         let bestMoveValue = isMaximizingPlayer
 					? Number.NEGATIVE_INFINITY
 					: Number.POSITIVE_INFINITY;
@@ -168,14 +210,14 @@ export default function App({ boardWidth }) {
 		const possibleMoves = game.moves();
 		const workers = [];
 		// Most moves evaluated on 3 threads with remainder on main thread
-		const workerChunk = Math.floor(possibleMoves.length / numThreads);
-		const mainThreadStart = workerChunk * numThreads;
+		const workerChunk = Math.floor(possibleMoves.length / NUM_THREADS);
+		const mainThreadStart = workerChunk * NUM_THREADS;
 		let numWorkersDone = 0;
 
 		let bestEval = Number.NEGATIVE_INFINITY;
 		let bestMove;
 
-		for (let i = 0; i < numThreads; i++) {
+		for (let i = 0; i < NUM_THREADS; i++) {
 			workers[i] = new Worker(new URL('./worker.js', import.meta.url));
 			workers[i].postMessage({
 				depth: 4,
@@ -195,13 +237,15 @@ export default function App({ boardWidth }) {
 				}
 
                 // check if all workers done
-				if (numWorkersDone === numThreads) {
+				if (numWorkersDone === NUM_THREADS) {
 					console.log('bestmove', bestEval, bestMove);
 					safeGameMutate((g) => g.move(bestMove));
                     
                     // log total time taken
                     const endTime = performance.now();
 		            console.log(`TOTAL TIME took ${(endTime - startTime)/1000} seconds`);
+					console.log('nodes checked', nodes);
+					nodes = 0;
 				}
 			};
 		}
@@ -260,11 +304,11 @@ export default function App({ boardWidth }) {
 
     // unthreaded computerMove (testing purposes)
     function unthreadedMove() {
-        if (isFirstMove) {
-            game.move('d5');
-            setIsFirstMove(false);
-            return;
-        }
+        // if (isFirstMove) {
+        //     game.move('d5');
+        //     setIsFirstMove(false);
+        //     return;
+        // }
         const startTime = performance.now();
         const possibleMoves = game.moves();
         let bestEval = Number.NEGATIVE_INFINITY;
@@ -284,6 +328,12 @@ export default function App({ boardWidth }) {
         safeGameMutate((g) => g.move(bestMove));
         const endTime = performance.now();
         console.log(`TOTAL TIME took ${(endTime - startTime)/1000} seconds`);
+		console.log(`TOTAL SORTING TIME took ${sortingTime/1000} seconds`);
+		console.log(`TOTAL QUIESCENCE TIME took ${quiescenceTime / 1000} seconds`);
+		console.log('nodes checked', nodes);
+		nodes = 0;
+		sortingTime = 0;
+		quiescenceTime = 0;
     }
 
 	function positionEval(playerColor) {
