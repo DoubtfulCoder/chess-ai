@@ -6,7 +6,10 @@ import { moveEval, sortMoves } from './PositionEval';
 // console.log('Qd6', moveEval('Qd6', 'black'));
 console.log('Number of threads on your device: ', navigator.hardwareConcurrency);
 
+// Gets number of threads on your device
 const NUM_THREADS = navigator.hardwareConcurrency;
+
+// Position constants
 const QUEENS_RAID = 'rnb1k1nr/pppp1ppp/5q2/2b1p3/4P1Q1/2N5/PPPP1PPP/R1B1KBNR w KQkq - 4 4';
 const TRICKY_POSITION = 'r3k2r/p1ppqpb1/bn2pnp1/3PN3/4P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1';
 
@@ -40,11 +43,13 @@ export function isQuietMove(move) {
 
 export default function App({ boardWidth }) {
 	const chessboardRef = useRef();
-	const [game, setGame] = useState(new Chess(TRICKY_POSITION));
+	const [game, setGame] = useState(new Chess());
     const [isFirstMove, setIsFirstMove] = useState(true);
 	const [arrows, setArrows] = useState([]);
 	const [boardOrientation, setBoardOrientation] = useState('white');
 	const [currentTimeout, setCurrentTimeout] = useState(undefined);
+	const [engineDepth, setEngineDepth] = useState(3);
+	const [quiescenceDepth, setQuiescenceDepth] = useState(2);
 
 
 	// console.log(game.get('a3'));
@@ -73,7 +78,7 @@ export default function App({ boardWidth }) {
             } else {
 				const startTime = performance.now();
                 const quiescence = quiescenceSearch(
-                    2, isMaximizingPlayer, playerColor, moveEval, mostRecentMove,
+                    quiescenceDepth, isMaximizingPlayer, playerColor, moveEval, mostRecentMove,
                     alpha, beta
                 );
 				const endTime = performance.now();
@@ -304,11 +309,11 @@ export default function App({ boardWidth }) {
 
     // unthreaded computerMove (testing purposes)
     function unthreadedMove() {
-        // if (isFirstMove) {
-        //     game.move('d5');
-        //     setIsFirstMove(false);
-        //     return;
-        // }
+        if (isFirstMove) {
+            game.move('d5');
+            setIsFirstMove(false);
+            return;
+        }
         const startTime = performance.now();
         const possibleMoves = game.moves();
         let bestEval = Number.NEGATIVE_INFINITY;
@@ -317,7 +322,7 @@ export default function App({ boardWidth }) {
             const posMove = possibleMoves[i];
             game.move(posMove);
             const squareEval = moveEval(posMove);
-            const score = minimax(2, false, 'black', squareEval, posMove);
+            const score = minimax(engineDepth-1, false, 'black', squareEval, posMove);
             game.undo();
             if (score > bestEval) {
                 bestEval = score;
@@ -382,7 +387,7 @@ export default function App({ boardWidth }) {
 				}}
 				ref={chessboardRef}
 			/>
-            <p>History: {game.history().map(move => move + '\n')}</p>
+			<p>History: {game.history().map((move) => move + '\n')}</p>
 			<button
 				className="rc-button"
 				onClick={() => {
@@ -428,6 +433,31 @@ export default function App({ boardWidth }) {
 			>
 				Set Custom Arrows
 			</button>
+
+			{/* Select Depth */}
+			<label htmlFor="depth">Depth: </label>
+			<select
+				name="depth"
+				id="depth"
+				onChange={(e) => setEngineDepth(Number(e.target.value))}
+			>
+				<option value="3">3</option>
+				<option value="4">4</option>
+				<option value="3">5</option>
+			</select>
+
+			{/* Select quiescence depth */}
+			<label htmlFor="quiescence">Quiescence depth: </label>
+			<select
+				name="quiescence"
+				id="depth"
+				onChange={(e) => setQuiescenceDepth(Number(e.target.value))}
+			>
+				<option value="2">2</option>
+				<option value="3">3</option>
+				<option value="4">4</option>
+				<option value="3">5</option>
+			</select>
 		</div>
 	);
 }

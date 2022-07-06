@@ -7,7 +7,7 @@ A chess AI I made using javascript. Uses the following algorithms:
 - Matrix map of optimal squares for each piece
 - Heuristic evaluation of positions through material
 - Quiescence search
-- MVV/LVA (Most Valuable Victim - Least Valuable Aggressor) optimization
+- MVV/LVA (Most Valuable Victim - Least Valuable Aggressor) ordering
 - Null-move pruning/heursitic (TODO)
 - Iterative deepening (OTODO)
 - Killer heuristic (TODO)
