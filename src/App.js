@@ -4,6 +4,9 @@ import { Chessboard } from 'react-chessboard';
 import { moveEval } from './PositionEval';
 
 // console.log('Qd6', moveEval('Qd6', 'black'));
+console.log('Number of threads on your device: ', navigator.hardwareConcurrency);
+
+const numThreads = navigator.hardwareConcurrency;
 
 export const pieceValues = {
 	p: 1,
@@ -28,6 +31,11 @@ function allDefined(arr) {
 	return true;
 }
 
+/* returns whether a move is quiet (a non-capture) or not */
+export function isQuietMove(move) {
+    return !move.includes('x');
+}
+
 export default function App({ boardWidth }) {
 	const chessboardRef = useRef();
 	const [game, setGame] = useState(new Chess());
@@ -45,15 +53,69 @@ export default function App({ boardWidth }) {
 	}
 
 	function minimax(
-		depth,
-		isMaximizingPlayer,
-		playerColor,
-        moveEval,
-		alpha = Number.NEGATIVE_INFINITY,
-		beta = Number.POSITIVE_INFINITY
+		depth, isMaximizingPlayer, playerColor, moveEval, mostRecentMove,
+		alpha = Number.NEGATIVE_INFINITY, beta = Number.POSITIVE_INFINITY
 	) {
 		// Base case: evaluate board
 		if (depth === 0) {
+            // check for quiet moves (non-captures)
+            if (isQuietMove(mostRecentMove)) {
+			    return positionEval(playerColor) + moveEval;
+            } else {
+                return quiescenceSearch(
+                    2, isMaximizingPlayer, playerColor, moveEval, mostRecentMove,
+                    alpha, beta
+                );
+            }
+		}
+
+		// Recursive case: search possible moves
+		const possibleMoves = game.moves();
+        let bestMoveValue = isMaximizingPlayer
+					? Number.NEGATIVE_INFINITY
+					: Number.POSITIVE_INFINITY;
+
+		// Search through all possible moves
+		for (let i = 0; i < possibleMoves.length; i++) {
+			const move = possibleMoves[i];
+			// Make the move, but undo before exiting loop
+			game.move(move);
+			// Recursively get the value from this move
+			const score = minimax(depth-1, !isMaximizingPlayer, playerColor, moveEval, move, alpha, beta);
+
+			if (isMaximizingPlayer) {
+				// Computer's move: maximize position
+				if (score > bestMoveValue) {
+					bestMoveValue = score;
+				}
+				alpha = Math.max(alpha, score);
+			} else {
+				// Opponent's move: minimize position
+				if (score < bestMoveValue) {
+					bestMoveValue = score;
+				}
+				beta = Math.min(beta, score);
+			}
+			game.undo();
+			// Check for alpha beta pruning
+			if (beta <= alpha) {
+				// console.log('Prune', alpha, beta);
+				break;
+			}
+		}
+
+        return bestMoveValue;
+	}
+
+    // does additional analysis on "non-quiet" moves i.e. captures
+    function quiescenceSearch(
+		depth, isMaximizingPlayer, playerColor, moveEval, mostRecentMove,
+		alpha = Number.NEGATIVE_INFINITY, beta = Number.POSITIVE_INFINITY
+	) {
+        console.log('Quiescence search', mostRecentMove);
+		// Base case: evaluate board
+		if (isQuietMove(mostRecentMove) || depth === 0) {
+            // console.log('Quiescence search', mostRecentMove);
 			return positionEval(playerColor) + moveEval;
 		}
 
@@ -69,14 +131,7 @@ export default function App({ boardWidth }) {
 			// Make the move, but undo before exiting loop
 			game.move(move);
 			// Recursively get the value from this move
-			const score = minimax(
-				depth - 1,
-				!isMaximizingPlayer,
-				playerColor,
-				moveEval,
-				alpha,
-				beta
-			);
+			const score = quiescenceSearch(depth-1, !isMaximizingPlayer, playerColor, moveEval, move, alpha, beta);
 
 			if (isMaximizingPlayer) {
 				// Computer's move: maximize position
@@ -108,17 +163,19 @@ export default function App({ boardWidth }) {
             setIsFirstMove(false);
             return;
         }
+        const startTime = performance.now();
+
 		const possibleMoves = game.moves();
 		const workers = [];
 		// Most moves evaluated on 3 threads with remainder on main thread
-		const workerChunk = Math.floor(possibleMoves.length / 3);
-		const mainThreadStart = workerChunk * 3;
+		const workerChunk = Math.floor(possibleMoves.length / numThreads);
+		const mainThreadStart = workerChunk * numThreads;
 		let numWorkersDone = 0;
 
 		let bestEval = Number.NEGATIVE_INFINITY;
 		let bestMove;
 
-		for (let i = 0; i < 3; i++) {
+		for (let i = 0; i < numThreads; i++) {
 			workers[i] = new Worker(new URL('./worker.js', import.meta.url));
 			workers[i].postMessage({
 				depth: 4,
@@ -126,6 +183,7 @@ export default function App({ boardWidth }) {
 				posMoves: possibleMoves.slice(i * workerChunk, (i + 1) * workerChunk),
 				gameFEN: game.fen(),
 			});
+			// eslint-disable-next-line no-loop-func
 			workers[i].onmessage = (msg) => {
 				numWorkersDone++;
 
@@ -136,20 +194,25 @@ export default function App({ boardWidth }) {
 					bestMove = msgMove;
 				}
 
-				if (numWorkersDone === 3) {
+                // check if all workers done
+				if (numWorkersDone === numThreads) {
 					console.log('bestmove', bestEval, bestMove);
 					safeGameMutate((g) => g.move(bestMove));
+                    
+                    // log total time taken
+                    const endTime = performance.now();
+		            console.log(`TOTAL TIME took ${(endTime - startTime)/1000} seconds`);
 				}
 			};
 		}
 
 		// Finish last few moves on main thread
-		const startTime = performance.now();
+		// const startTime = performance.now();
 		for (let i = mainThreadStart; i < possibleMoves.length; i++) {
 			const posMove = possibleMoves[i];
 			game.move(posMove);
 			const squareEval = moveEval(posMove);
-			const score = minimax(3, false, 'black', squareEval);
+			const score = minimax(3, false, 'black', squareEval, posMove);
 			game.undo();
 			if (score > bestEval) {
 				bestEval = score;
@@ -157,8 +220,8 @@ export default function App({ boardWidth }) {
 			}
 		}
 
-		const endTime = performance.now();
-		console.log(`MAIN THREAD: minmax took ${(endTime - startTime)/1000} seconds`);
+		// const endTime = performance.now();
+		// console.log(`MAIN THREAD: minmax took ${(endTime - startTime)/1000} seconds`);
 
 		// const startTime = performance.now();
 		// for (let i = 0; i < possibleMoves.length; i++) {
@@ -195,6 +258,34 @@ export default function App({ boardWidth }) {
 		// safeGameMutate((g) => g.move(bestMove));
 	}
 
+    // unthreaded computerMove (testing purposes)
+    function unthreadedMove() {
+        if (isFirstMove) {
+            game.move('d5');
+            setIsFirstMove(false);
+            return;
+        }
+        const startTime = performance.now();
+        const possibleMoves = game.moves();
+        let bestEval = Number.NEGATIVE_INFINITY;
+        let bestMove;
+        for (let i = 0; i < possibleMoves.length; i++) {
+            const posMove = possibleMoves[i];
+            game.move(posMove);
+            const squareEval = moveEval(posMove);
+            const score = minimax(2, false, 'black', squareEval, posMove);
+            game.undo();
+            if (score > bestEval) {
+                bestEval = score;
+                bestMove = posMove;
+            }
+        }
+        console.log('bestmove', bestEval, bestMove);
+        safeGameMutate((g) => g.move(bestMove));
+        const endTime = performance.now();
+        console.log(`TOTAL TIME took ${(endTime - startTime)/1000} seconds`);
+    }
+
 	function positionEval(playerColor) {
 		let position = game.fen().split(' ')[0];
 		let score = 0;
@@ -220,7 +311,7 @@ export default function App({ boardWidth }) {
 		if (move === null) return false;
 
 		// store timeout so it can be cleared on undo/reset so computer doesn't execute move
-		const newTimeout = setTimeout(computerMove, 200);
+		const newTimeout = setTimeout(unthreadedMove, 200);
 		setCurrentTimeout(newTimeout);
 		return true;
 	}
