@@ -1,19 +1,19 @@
 {
   "files": {
     "main.css": "/chess-ai/static/css/main.e6c13ad2.css",
-    "main.js": "/chess-ai/static/js/main.45e16dc3.js",
-    "static/js/470.c1c0833a.chunk.js": "/chess-ai/static/js/470.c1c0833a.chunk.js",
+    "main.js": "/chess-ai/static/js/main.d28ff6ee.js",
+    "static/js/470.3138bc60.chunk.js": "/chess-ai/static/js/470.3138bc60.chunk.js",
     "static/js/787.80417609.chunk.js": "/chess-ai/static/js/787.80417609.chunk.js",
     "static/js/408.d0f93b06.chunk.js": "/chess-ai/static/js/408.d0f93b06.chunk.js",
     "index.html": "/chess-ai/index.html",
     "main.e6c13ad2.css.map": "/chess-ai/static/css/main.e6c13ad2.css.map",
-    "main.45e16dc3.js.map": "/chess-ai/static/js/main.45e16dc3.js.map",
-    "470.c1c0833a.chunk.js.map": "/chess-ai/static/js/470.c1c0833a.chunk.js.map",
+    "main.d28ff6ee.js.map": "/chess-ai/static/js/main.d28ff6ee.js.map",
+    "470.3138bc60.chunk.js.map": "/chess-ai/static/js/470.3138bc60.chunk.js.map",
     "787.80417609.chunk.js.map": "/chess-ai/static/js/787.80417609.chunk.js.map",
     "408.d0f93b06.chunk.js.map": "/chess-ai/static/js/408.d0f93b06.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.e6c13ad2.css",
-    "static/js/main.45e16dc3.js"
+    "static/js/main.d28ff6ee.js"
   ]
 }
