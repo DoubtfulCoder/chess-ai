@@ -13,6 +13,10 @@ const NUM_THREADS = navigator.hardwareConcurrency - 1;
 const QUEENS_RAID = 'rnb1k1nr/pppp1ppp/5q2/2b1p3/4P1Q1/2N5/PPPP1PPP/R1B1KBNR w KQkq - 4 4';
 const MATE_IN_ONE = 'k7/4Q3/5R2/p7/4P3/2N5/PPPPBPPP/R1B1K1N1 w Q - 0 1';
 const TRICKY_POSITION = 'r3k2r/p1ppqpb1/bn2pnp1/3PN3/4P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1';
+const ENDGAME_POSITION = '6k1/p3n1p1/1p3rp1/2p1p3/P1Pp1P2/1P1P4/3KPR2/6R1 w - - 0 34';
+const ENDGAME_POSITION_2 = '1r6/1P1kn3/3bppp1/7p/5N1P/6P1/3B1P2/1R4K1 w - - 0 1';
+const FREE_PAWN_POSITION = '1b6/1Pk5/8/8/8/5K2/6P1/8 w - - 0 1';
+const PREVENT_PROMOTION_POSITION = '8/bPk5/5KP1/8/8/8/8/8 w - - 1 20';
 
 export const pieceValues = {
 	p: 1,
@@ -42,16 +46,25 @@ export function isQuietMove(move) {
     return !move.includes('x');
 }
 
+/* counts number of pieces on board given FEN */
+function countNumberOfPiecesOnBoard(fen) {
+	fen = fen.split(' ')[0]; // just the position
+	fen = fen.replace(/[0-9/]/g, ''); // removes all numbers and slashes
+	return fen.length;
+}
+
 export default function App({ boardWidth }) {
 	const chessboardRef = useRef();
 	const [game, setGame] = useState(new Chess());
+	const [engineDepth, setEngineDepth] = useState(4);
+	const [quiescenceDepth, setQuiescenceDepth] = useState(4);
     const [isFirstMove, setIsFirstMove] = useState(true);
 	const [arrows, setArrows] = useState([]);
 	const [boardOrientation, setBoardOrientation] = useState('white');
 	const [currentTimeout, setCurrentTimeout] = useState(undefined);
-	const [engineDepth, setEngineDepth] = useState(4);
-	const [quiescenceDepth, setQuiescenceDepth] = useState(4);
-
+	const [numPiecesOnBoard, setNumPiecesOnBoard] = useState(
+		countNumberOfPiecesOnBoard(game.fen())
+	);
 
 	// console.log(game.get('a3'));
 	let nodes = 0;
@@ -147,8 +160,8 @@ export default function App({ boardWidth }) {
 
 		// evaluate position
 		const evaluation = positionEval(playerColor) + moveEval;
-		// fail-hard beta cutoff
-		if (evaluation >= beta)
+		// fail-hard beta cutoff (piece cut off so it prevents things like promotions)
+		if (evaluation >= beta && numPiecesOnBoard >= 8) 
 		{
 			// node (move) fails high
 			return beta;
@@ -211,6 +224,9 @@ export default function App({ boardWidth }) {
         //     setIsFirstMove(false);
         //     return;
         // }
+
+		// TODO : change moveEval if threading is brought back
+
         const startTime = performance.now();
 
 		let possibleMoves = game.moves();
@@ -334,6 +350,7 @@ export default function App({ boardWidth }) {
         //     setIsFirstMove(false);
         //     return;
         // }
+		
         const startTime = performance.now();
         let possibleMoves = game.moves();
 		possibleMoves = sortMoves(game, possibleMoves);
@@ -344,7 +361,8 @@ export default function App({ boardWidth }) {
         for (let i = 0; i < possibleMoves.length; i++) {
             const posMove = possibleMoves[i];
             game.move(posMove);
-            const squareEval = moveEval(posMove);
+            const squareEval = moveEval(posMove, 'black', numPiecesOnBoard);
+			console.log('squareeval', posMove, squareEval);
             const score = minimax(engineDepth-1, false, 'black', squareEval, posMove, bestEval);
             game.undo();
             if (score > bestEval) {
@@ -353,13 +371,16 @@ export default function App({ boardWidth }) {
             }
         }
 
-		// bestMove is undefined if checkmate in one
+		// bestMove is undefined if checkmate in one for opponent
 		if (bestMove === undefined && possibleMoves.length !== 0) {
 			bestMove = possibleMoves[0];
 		}
 
-        console.log('bestmove', bestEval, bestMove);
+        console.log('bestmove', bestEval, bestMove);		
         safeGameMutate((g) => g.move(bestMove));
+		// update number of pieces on board
+		setNumPiecesOnBoard(countNumberOfPiecesOnBoard(game.fen()));
+
         const endTime = performance.now();
         console.log(`TOTAL TIME took ${(endTime - startTime)/1000} seconds`);
 		console.log(`TOTAL SORTING TIME took ${sortingTime/1000} seconds`);
@@ -390,12 +411,24 @@ export default function App({ boardWidth }) {
 			promotion: 'q', // always promote to a queen for example simplicity
 		});
 		setGame(gameCopy);
+		setNumPiecesOnBoard(countNumberOfPiecesOnBoard(gameCopy.fen()));
+
+		// hike up the depth in endgame
+		if (numPiecesOnBoard <= 8 && engineDepth < 5) {
+			console.log('hiked!');
+			setEngineDepth(engineDepth + 1);
+		}
+		// hike it up even more
+		if (numPiecesOnBoard <= 5 && engineDepth < 6) {
+			console.log('more!');
+			setEngineDepth(engineDepth + 1);
+		}
 
 		// illegal move
 		if (move === null) return false;
 
 		// store timeout so it can be cleared on undo/reset so computer doesn't execute move
-		const newTimeout = setTimeout(unthreadedMove, 200);
+		const newTimeout = setTimeout(unthreadedMove, 300);
 		setCurrentTimeout(newTimeout);
 		return true;
 	}
