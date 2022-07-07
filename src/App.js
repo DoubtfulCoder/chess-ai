@@ -7,10 +7,11 @@ import { moveEval, sortMoves } from './PositionEval';
 console.log('Number of threads on your device: ', navigator.hardwareConcurrency);
 
 // Gets number of threads on your device
-const NUM_THREADS = navigator.hardwareConcurrency;
+const NUM_THREADS = navigator.hardwareConcurrency - 1;
 
 // Position constants
 const QUEENS_RAID = 'rnb1k1nr/pppp1ppp/5q2/2b1p3/4P1Q1/2N5/PPPP1PPP/R1B1KBNR w KQkq - 4 4';
+const MATE_IN_ONE = 'k7/4Q3/5R2/p7/4P3/2N5/PPPPBPPP/R1B1K1N1 w Q - 0 1';
 const TRICKY_POSITION = 'r3k2r/p1ppqpb1/bn2pnp1/3PN3/4P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1';
 
 export const pieceValues = {
@@ -48,8 +49,8 @@ export default function App({ boardWidth }) {
 	const [arrows, setArrows] = useState([]);
 	const [boardOrientation, setBoardOrientation] = useState('white');
 	const [currentTimeout, setCurrentTimeout] = useState(undefined);
-	const [engineDepth, setEngineDepth] = useState(3);
-	const [quiescenceDepth, setQuiescenceDepth] = useState(2);
+	const [engineDepth, setEngineDepth] = useState(4);
+	const [quiescenceDepth, setQuiescenceDepth] = useState(4);
 
 
 	// console.log(game.get('a3'));
@@ -65,6 +66,7 @@ export default function App({ boardWidth }) {
 		});
 	}
 
+	// minimax search with alpha-beta pruning
 	function minimax(
 		depth, isMaximizingPlayer, playerColor, moveEval, mostRecentMove,
 		alpha = Number.NEGATIVE_INFINITY, beta = Number.POSITIVE_INFINITY
@@ -145,7 +147,6 @@ export default function App({ boardWidth }) {
 
 		// evaluate position
 		const evaluation = positionEval(playerColor) + moveEval;
-		
 		// fail-hard beta cutoff
 		if (evaluation >= beta)
 		{
@@ -157,7 +158,7 @@ export default function App({ boardWidth }) {
 		// Base case: evaluate board
 		if (isQuietMove(mostRecentMove) || depth === 0) {
             // console.log('Quiescence search', mostRecentMove);
-			return positionEval(playerColor) + moveEval;
+			return evaluation;
 		}
 
 		// Recursive case: search possible moves
@@ -205,30 +206,53 @@ export default function App({ boardWidth }) {
 	}
 
 	function computerMove() {
-        if (isFirstMove) {
-            game.move('d5');
-            setIsFirstMove(false);
-            return;
-        }
+        // if (isFirstMove) {
+        //     game.move('d5');
+        //     setIsFirstMove(false);
+        //     return;
+        // }
         const startTime = performance.now();
 
-		const possibleMoves = game.moves();
+		let possibleMoves = game.moves();
+		possibleMoves = sortMoves(game, possibleMoves);
+
+		let bestEval = Number.NEGATIVE_INFINITY;
+		let bestMove;
+
+		// Evaluate first 3 moves (highest values in MVV-LVA) 
+		// on main thread for alpha values for worker threads
+		const startTime2 = performance.now();
+		for (let i = 0; i < 3; i++) {
+			const posMove = possibleMoves[i];
+			game.move(posMove);
+			const squareEval = moveEval(posMove);
+			const score = minimax(engineDepth, false, 'black', squareEval, posMove, bestEval);
+			game.undo();
+			if (score > bestEval) {
+				bestEval = score;
+				bestMove = posMove;
+			}
+		}
+		const endTime2 = performance.now();
+		console.log('first 3 took: ', (endTime2 - startTime2));
+
+		// remove first 3 moves from possible moves
+		possibleMoves = possibleMoves.slice(3);
+
 		const workers = [];
 		// Most moves evaluated on 3 threads with remainder on main thread
 		const workerChunk = Math.floor(possibleMoves.length / NUM_THREADS);
 		const mainThreadStart = workerChunk * NUM_THREADS;
 		let numWorkersDone = 0;
 
-		let bestEval = Number.NEGATIVE_INFINITY;
-		let bestMove;
-
 		for (let i = 0; i < NUM_THREADS; i++) {
 			workers[i] = new Worker(new URL('./worker.js', import.meta.url));
 			workers[i].postMessage({
-				depth: 4,
-				isMaximizingPlayer: true,
+				depth: engineDepth,
+				quiescenceDepth: quiescenceDepth,
 				posMoves: possibleMoves.slice(i * workerChunk, (i + 1) * workerChunk),
 				gameFEN: game.fen(),
+				alpha: bestEval,
 			});
 			// eslint-disable-next-line no-loop-func
 			workers[i].onmessage = (msg) => {
@@ -256,21 +280,17 @@ export default function App({ boardWidth }) {
 		}
 
 		// Finish last few moves on main thread
-		// const startTime = performance.now();
 		for (let i = mainThreadStart; i < possibleMoves.length; i++) {
 			const posMove = possibleMoves[i];
 			game.move(posMove);
 			const squareEval = moveEval(posMove);
-			const score = minimax(3, false, 'black', squareEval, posMove);
+			const score = minimax(engineDepth, false, 'black', squareEval, posMove, bestEval);
 			game.undo();
 			if (score > bestEval) {
 				bestEval = score;
 				bestMove = posMove;
 			}
 		}
-
-		// const endTime = performance.now();
-		// console.log(`MAIN THREAD: minmax took ${(endTime - startTime)/1000} seconds`);
 
 		// const startTime = performance.now();
 		// for (let i = 0; i < possibleMoves.length; i++) {
@@ -309,26 +329,35 @@ export default function App({ boardWidth }) {
 
     // unthreaded computerMove (testing purposes)
     function unthreadedMove() {
-        if (isFirstMove) {
-            game.move('d5');
-            setIsFirstMove(false);
-            return;
-        }
+        // if (isFirstMove) {
+        //     game.move('d5');
+        //     setIsFirstMove(false);
+        //     return;
+        // }
         const startTime = performance.now();
-        const possibleMoves = game.moves();
+        let possibleMoves = game.moves();
+		possibleMoves = sortMoves(game, possibleMoves);
         let bestEval = Number.NEGATIVE_INFINITY;
         let bestMove;
+
+		// do minimax on each move
         for (let i = 0; i < possibleMoves.length; i++) {
             const posMove = possibleMoves[i];
             game.move(posMove);
             const squareEval = moveEval(posMove);
-            const score = minimax(engineDepth-1, false, 'black', squareEval, posMove);
+            const score = minimax(engineDepth-1, false, 'black', squareEval, posMove, bestEval);
             game.undo();
             if (score > bestEval) {
                 bestEval = score;
                 bestMove = posMove;
             }
         }
+
+		// bestMove is undefined if checkmate in one
+		if (bestMove === undefined && possibleMoves.length !== 0) {
+			bestMove = possibleMoves[0];
+		}
+
         console.log('bestmove', bestEval, bestMove);
         safeGameMutate((g) => g.move(bestMove));
         const endTime = performance.now();
@@ -440,10 +469,12 @@ export default function App({ boardWidth }) {
 				name="depth"
 				id="depth"
 				onChange={(e) => setEngineDepth(Number(e.target.value))}
+				defaultValue="4"
 			>
 				<option value="3">3</option>
 				<option value="4">4</option>
-				<option value="3">5</option>
+				<option value="5">5</option>
+				<option value="6">6</option>
 			</select>
 
 			{/* Select quiescence depth */}
@@ -452,11 +483,12 @@ export default function App({ boardWidth }) {
 				name="quiescence"
 				id="depth"
 				onChange={(e) => setQuiescenceDepth(Number(e.target.value))}
+				defaultValue="4"
 			>
 				<option value="2">2</option>
 				<option value="3">3</option>
 				<option value="4">4</option>
-				<option value="3">5</option>
+				<option value="5">5</option>
 			</select>
 		</div>
 	);
