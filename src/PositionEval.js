@@ -163,9 +163,9 @@ export function moveEval(move, color='black', numPiecesOnBoard) {
     // promotion is +9
     if (move.includes('=')) { return 9; }
     // discourage checks in beginning(?)
-    if (move.includes('+') && numPiecesOnBoard > 20) { moveValue = -0.3; }
+    if (move.includes('+') && numPiecesOnBoard > 20) { moveValue += -0.3; }
 	// encourage captures slightly
-	if (move.includes('x')) { moveValue = 0.3; }
+	if (move.includes('x')) { moveValue += 0.3; }
 
     move = stripped_san(move); // remove decorations like +!?# at end
 	// piece code is always first char for non-pawns
@@ -226,7 +226,7 @@ export function getCaptureValue(game, move) {
 
 /* Get value of move (captures given higher value) */
 export function getMoveValue(game, move) {
-	if (isQuietMove(move)) {
+	if (isQuietMove(game, move)) {
 		return 0;
 	} else {
 		try {

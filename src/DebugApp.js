@@ -5,6 +5,8 @@ import { moveEval, sortMoves } from './PositionEval';
 
 // console.log('Qd6', moveEval('Qd6', 'black'));
 console.log('Number of threads on your device: ', navigator.hardwareConcurrency);
+// check if get is working
+// console.log('c1', game.get(114));
 
 // Gets number of threads on your device
 const NUM_THREADS = navigator.hardwareConcurrency - 1;
@@ -42,12 +44,9 @@ function allDefined(arr) {
 }
 
 /* returns whether a move is quiet (a non-capture) or not */
-// export function isQuietMove(move) {
-//     return !move.includes('x');
-// }
 export function isQuietMove(game, move) {
 	// check if there is a piece on new square (capture)
-	return game.get(move.to) === null;
+    return game.get(move.to) === null;
 }
 
 /* counts number of pieces on board given FEN */
@@ -57,7 +56,7 @@ function countNumberOfPiecesOnBoard(fen) {
 	return fen.length;
 }
 
-export default function App({ boardWidth }) {
+export default function DebugApp({ boardWidth }) {
 	const chessboardRef = useRef();
 	const [game, setGame] = useState(new Chess());
 	const [engineDepth, setEngineDepth] = useState(4);
@@ -70,12 +69,13 @@ export default function App({ boardWidth }) {
 		countNumberOfPiecesOnBoard(game.fen())
 	);
 
-	// console.log(game.get('a3'));
 	let nodes = 0;
 	let sortingTime = 0;
 	let quiescenceTime = 0;
 	let moveGenerationTime = 0;
 	let positionEvalTime = 0;
+    let gameMoveTime = 0;
+    let gameUndoTime = 0;
 
 	function safeGameMutate(modify) {
 		setGame((g) => {
@@ -115,10 +115,10 @@ export default function App({ boardWidth }) {
 		moveGenerationTime += endTime - startTime;
 		// Sort moves to put captures first
 		// console.log('presort', possibleMoves);
-		// const startTime = performance.now();
+		const startSortTime = performance.now();
 		possibleMoves = sortMoves(game, possibleMoves);
-		// const endTime = performance.now();
-		// sortingTime += (endTime - startTime);
+		const endSortTime = performance.now();
+		sortingTime += (endSortTime - startSortTime);
 		// console.log('postsort', possibleMoves);
         let bestMoveValue = isMaximizingPlayer
 					? Number.NEGATIVE_INFINITY
@@ -126,9 +126,12 @@ export default function App({ boardWidth }) {
 
 		// Search through all possible moves
 		for (let i = 0; i < possibleMoves.length; i++) {
+            const startGameMoveTime = performance.now();
 			const move = possibleMoves[i];
 			// Make the move, but undo before exiting loop
 			game.move(move);
+            const endGameMoveTime = performance.now();
+            gameMoveTime += endGameMoveTime - startGameMoveTime;
 			// Recursively get the value from this move
 			const score = minimax(depth-1, !isMaximizingPlayer, playerColor, moveEval, move, alpha, beta);
 
@@ -145,7 +148,10 @@ export default function App({ boardWidth }) {
 				}
 				beta = Math.min(beta, score);
 			}
+            const startGameUndoTime = performance.now();
 			game.undo();
+            const endGameUndoTime = performance.now();
+            gameUndoTime += endGameUndoTime - startGameUndoTime;
 			// Check for alpha beta pruning
 			if (beta <= alpha) {
 				// console.log('Prune', alpha, beta);
@@ -186,7 +192,10 @@ export default function App({ boardWidth }) {
 		moveGenerationTime += endTime - startTime;
 		// console.log('presort', possibleMoves);
 		// const startTime = performance.now();
+		const startSortTime = performance.now();
 		possibleMoves = sortMoves(game, possibleMoves);
+		const endSortTime = performance.now();
+		sortingTime += endSortTime - startSortTime;
 		// const endTime = performance.now();
 		// sortingTime += endTime - startTime;
 		// console.log('postsort', possibleMoves);
@@ -196,9 +205,12 @@ export default function App({ boardWidth }) {
 
 		// Search through all possible moves
 		for (let i = 0; i < possibleMoves.length; i++) {
+			const startGameMoveTime = performance.now();
 			const move = possibleMoves[i];
 			// Make the move, but undo before exiting loop
 			game.move(move);
+			const endGameMoveTime = performance.now();
+			gameMoveTime += endGameMoveTime - startGameMoveTime;
 			// Recursively get the value from this move
 			const score = quiescenceSearch(depth-1, !isMaximizingPlayer, playerColor, moveEval, move, alpha, beta);
 
@@ -215,7 +227,10 @@ export default function App({ boardWidth }) {
 				}
 				beta = Math.min(beta, score);
 			}
+            const startGameUndoTime = performance.now();
 			game.undo();
+            const endGameUndoTime = performance.now();
+            gameUndoTime += endGameUndoTime - startGameUndoTime;
 			// Check for alpha beta pruning
 			if (beta <= alpha) {
 				// console.log('Prune', alpha, beta);
@@ -393,17 +408,63 @@ export default function App({ boardWidth }) {
 
         const endTime = performance.now();
         console.log(`TOTAL TIME took ${(endTime - startTime)/1000} seconds`);
-		// console.log(`TOTAL SORTING TIME took ${sortingTime/1000} seconds`);
+		console.log(`total sorting time took ${sortingTime/1000} seconds`);
 		// console.log(`TOTAL QUIESCENCE TIME took ${quiescenceTime / 1000} seconds`);
 		console.log(`total move generation time took ${moveGenerationTime / 1000} seconds`);
 		console.log(`total position eval time took ${positionEvalTime / 1000} seconds`);
+        console.log(`total game move time took ${gameMoveTime / 1000} seconds`);
+        console.log(`total game undo time took ${gameUndoTime / 1000} seconds`);
+        console.log(
+					`move gen + game move + game undo time took ${
+						(moveGenerationTime + gameMoveTime + gameUndoTime) / 1000
+					} seconds`
+				);
 		console.log('nodes checked', nodes);
 		nodes = 0;
 		sortingTime = 0;
 		quiescenceTime = 0;
 		moveGenerationTime = 0;
 		positionEvalTime = 0;
+        gameMoveTime = 0;
+        gameUndoTime = 0;
     }
+
+	// checks time consumption for ugly vs. pretty move generation
+	function uglyVsPrettyMove() {
+		const numIters = 30;
+
+		// ugly version
+		const startTest1 = performance.now();
+		for (let i = 0; i < numIters; i++) {
+			const ugly_moves = game.moves_ugly();
+			console.log('ugly', ugly_moves);
+			// console.log('ugly moves: ', ugly_moves);
+			// safeGameMutate((g) => g.move(ugly_moves[0], { bypass: true }));
+			game.move(ugly_moves[0], { bypass: true });
+		}
+		const endTest1 = performance.now();
+		console.log('time: ', endTest1 - startTest1);
+
+		const startUndoTime1 = performance.now();
+		for (let i = 0; i < numIters; i++) {
+			game.undo();
+		}
+		const endUndoTime2 = performance.now();
+		console.log('undo time: ', endUndoTime2 - startUndoTime1);
+
+		// pretty version
+		const startTest2 = performance.now();
+		for (let i = 0; i < numIters; i++) {
+			const nice_moves = game.moves();
+			// console.log('nice moves: ', nice_moves);
+			// safeGameMutate((g) => g.move(nice_moves[0]));
+			game.move(nice_moves[0]);
+		}
+		const endTest2 = performance.now();
+		console.log('time: ', endTest2 - startTest2);
+
+		return;
+	}
 
 	function positionEval(playerColor) {
 		const startTime = performance.now();
@@ -448,7 +509,7 @@ export default function App({ boardWidth }) {
 		if (move === null) return false;
 
 		// store timeout so it can be cleared on undo/reset so computer doesn't execute move
-		const newTimeout = setTimeout(unthreadedMove, 300);
+		const newTimeout = setTimeout(uglyVsPrettyMove, 300);
 		setCurrentTimeout(newTimeout);
 		return true;
 	}
